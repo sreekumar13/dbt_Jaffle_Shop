@@ -1,5 +1,5 @@
 WITH source as (
-                SELECT * FROM dbt-tutorial.stripe.payment
+                SELECT * FROM {{ source('stripe', 'payment') }}
                 ),
 
 new_stg as (

@@ -5,4 +5,4 @@ sources:
     database: dbt-tutorial
     schema: stripe
     tables:
-      - name: payments
+      - name: payment
