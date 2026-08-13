@@ -1,6 +1,6 @@
 WITH orders as (
 
-  SELECT * FROM {{ ref('stg_jaffle_shop__order') }}
+  SELECT * FROM {{ ref('stg_jaffle_shop__orders') }}
   ),
 
 
@@ -11,7 +11,7 @@ customer_spend as (
   orders.order_id,
   COALESCE(SUM(payment_amount),0) as amount
   FROM orders
-  LEFT JOIN {{ ref('stg_stripe__payments') }} as sp
+  LEFT JOIN {{ ref('stg_stripe__payment') }} as sp
   USING (order_id)
   WHERE sp.payment_status = 'success' AND orders.status NOT LIKE ('returned%')
   GROUP BY orders.order_id
