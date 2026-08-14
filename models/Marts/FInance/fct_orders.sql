@@ -13,7 +13,7 @@ customer_spend as (
   FROM orders
   LEFT JOIN {{ ref('stg_stripe__payment') }} as sp
   USING (order_id)
-  WHERE sp.payment_status = 'success' AND orders.status NOT LIKE ('returned%')
+  WHERE sp.payment_status = 'success' AND orders.order_status NOT LIKE ('returned%')
   GROUP BY orders.order_id
 ),
 
