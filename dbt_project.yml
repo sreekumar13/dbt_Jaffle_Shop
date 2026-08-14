@@ -38,5 +38,5 @@ models:
   dbt_fundamentals_on_demand:
     staging:
       +materialized: view
-    Marts:
+    marts:
       +materialized: table
