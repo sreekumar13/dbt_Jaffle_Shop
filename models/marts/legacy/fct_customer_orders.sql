@@ -4,19 +4,40 @@ WITH
 
 customers AS (
     
-                SELECT * FROM {{ source('jaffle_shop', 'customers') }}
+                SELECT 
+                      ID AS customer_id,
+                      FIRST_NAME AS customer_givenname,
+                      LAST_NAME AS customer_surname
+                
+                FROM {{ source('jaffle_shop', 'customers') }}
 
              ),
 
 orders AS (
     
-                SELECT * FROM {{ source('jaffle_shop', 'orders') }}
+                SELECT 
+                      ID AS order_id,
+                      USER_ID AS customer_id,
+                      ORDER_DATE AS order_date,
+                      STATUS AS order_status,
+                      _ETL_LOADED_AT AS _etl_loaded_at
+                
+                FROM {{ source('jaffle_shop', 'orders') }}
 
           ),
 
 payments AS (
     
-                SELECT * FROM {{ source('stripe', 'payment') }}
+                SELECT 
+                      ID AS payment_id,
+                      ORDERID AS order_id,
+                      PAYMENTMETHOD AS payment_method,
+                      STATUS AS payment_status,
+                      ROUND(AMOUNT/100.0,2) AS payment_amount,
+                      CREATED AS payment_created_date,
+                      _BATCHED_AT AS _batched_at
+                
+                FROM {{ source('stripe', 'payment') }}
 
            ),
 
@@ -25,57 +46,31 @@ payments AS (
 customer_payment AS (
 
                      SELECT 
-                           ORDERID AS order_id, 
-                           max(CREATED) AS payment_finalized_date, 
-                           sum(AMOUNT) / 100.0 AS total_amount_paid
+                           order_id,
+                           sum(payment_amount) AS total_order_value
+                     
                      FROM payments
-                     WHERE status <> 'fail'
+                     WHERE payment_status <> 'fail'
                      GROUP BY 1
                     ),
 
-paid_orders AS (
-    
-                SELECT 
-                      orders.ID AS order_id,
-                      orders.USER_ID    AS customer_id,
-                      orders.ORDER_DATE AS order_date,
-                      orders.STATUS AS order_status,
-                      customer_payment.total_amount_paid AS total_amount_paid,
-                      customer_payment.payment_finalized_date AS payment_finalized_date,
-                      customers.FIRST_NAME AS customer_first_name,
-                      customers.LAST_NAME AS customer_last_name
-                FROM orders
-                
-                LEFT JOIN customer_payment 
-                ON orders.ID = customer_payment.order_id
-
-                LEFT JOIN customers
-                ON orders.USER_ID = customers.ID
-
-              ),
-
-customer_orders AS (
-                    SELECT 
-                          customers.ID AS customer_id,
-                          MIN(orders.ORDER_DATE) AS first_order_date
-                          
-                    FROM customers
-                    
-                    LEFT JOIN orders
-                    ON orders.USER_ID = customers.ID 
-                    GROUP BY 1
-                   ),
-
 customer_spend AS (
                          SELECT
-                                order_id,
-                                SUM(total_amount_paid) OVER(PARTITION BY customer_id ORDER BY order_id)AS customer_lifetime_spend,
-                                SUM(CASE WHEN order_status NOT LIKE 'return%' THEN total_amount_paid
-                                         ELSE 0 END) OVER (PARTITION BY customer_id ORDER BY order_id) AS customer_actual_spend
-                          FROM paid_orders po1
+                               orders.order_id,
+                               orders.customer_id,
+                               customer_payment.total_order_value,
+                               SUM(customer_payment.total_order_value) OVER(PARTITION BY orders.customer_id ORDER BY orders.order_id) AS customer_lifetime_spend,
+                               SUM(CASE WHEN orders.order_status NOT LIKE 'return%' 
+                                        THEN total_order_value --Cumulative sum of orders that were not returned
+                                        ELSE 0 END) 
+                                        OVER (PARTITION BY orders.customer_id ORDER BY orders.order_id) AS customer_actual_spend
                           
-                          
-                          ORDER BY 1
+                          FROM orders
+
+                          LEFT JOIN customer_payment
+                          USING(order_id)
+
+                          ORDER BY 2,1
 
                         ),
 
@@ -84,34 +79,39 @@ customer_spend AS (
 
 final AS (
           SELECT
-                paid_orders.order_id,
-                paid_orders.customer_id,
-                paid_orders.customer_last_name,
-                paid_orders.customer_first_name,
-                paid_orders.order_date,
-                paid_orders.total_amount_paid,
-                paid_orders.order_status,
-                paid_orders.payment_finalized_date,
-                ROW_NUMBER() OVER (PARTITION BY customer_orders.customer_id ORDER BY paid_orders.order_id) AS customer_sales_seq,
-                customer_spend.customer_actual_spend,
-                customer_spend.customer_lifetime_spend,
-                CASE WHEN customer_orders.first_order_date = paid_orders.order_date
+                orders.order_id,
+                orders.customer_id,
+                customers.customer_surname,
+                customers.customer_givenname,
+                orders.order_date,
+                customer_spend.total_order_value,
+                orders.order_status,
+                CASE WHEN MIN(orders.order_date) OVER (PARTITION BY orders.customer_id ORDER BY orders.order_id) = orders.order_date
                      THEN 'new' --categorized as new customer
                      ELSE 'return' -- categorized as returning customer
                 END AS customer_status,
-                customer_orders.first_order_date AS first_order_date
-          FROM paid_orders
+                ROW_NUMBER() OVER (PARTITION BY orders.customer_id ORDER BY orders.order_id) AS customer_sales_seq,
+                MIN(orders.order_date) OVER (PARTITION BY orders.customer_id ORDER BY orders.order_id) AS first_order_date,
+                customer_spend.customer_actual_spend,
+                customer_spend.customer_lifetime_spend,
+          
+          FROM orders
 
-          LEFT JOIN customer_orders 
-          USING (customer_id)
-    
+          LEFT JOIN customers
+          USING(customer_id)
+          
           LEFT JOIN customer_spend
           USING(order_id)
 
-          ORDER BY 1
+          ORDER BY 2,1
           
          )
 
 -- Simple SELECT Statements
 
-SELECT * FROM final order by customer_id, order_id 
+SELECT 
+      * 
+
+FROM final 
+
+ORDER BY customer_id, order_id 
