@@ -1,0 +1,14 @@
+functions:
+  - language: sql
+    config: 
+      database: jaffleshop13
+    name: divide_by_zero
+    description: If a denominator column has a possibility to have 0 as a value, this function will help not to throw an exception.
+    arguments:
+      - name: num
+        data_type: float64
+      - name: den
+        data_type: float64
+
+    returns: 
+      data_type: float64
