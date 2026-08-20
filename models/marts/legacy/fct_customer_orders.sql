@@ -38,41 +38,30 @@ payments AS (
                       _BATCHED_AT AS _batched_at
                 
                 FROM {{ source('stripe', 'payment') }}
-
+                WHERE STATUS <> 'fail'
            ),
 
 -- logical CTEs
 
-customer_payment AS (
-
-                     SELECT 
-                           order_id,
-                           sum(payment_amount) AS total_order_value
-                     
-                     FROM payments
-                     WHERE payment_status <> 'fail'
-                     GROUP BY 1
-                    ),
-
 customer_spend AS (
-                         SELECT
-                               orders.order_id,
-                               orders.customer_id,
-                               customer_payment.total_order_value,
-                               SUM(customer_payment.total_order_value) OVER(PARTITION BY orders.customer_id ORDER BY orders.order_id) AS customer_lifetime_spend,
-                               SUM(CASE WHEN orders.order_status NOT LIKE 'return%' 
-                                        THEN total_order_value --Cumulative sum of orders that were not returned
-                                        ELSE 0 END) 
-                                        OVER (PARTITION BY orders.customer_id ORDER BY orders.order_id) AS customer_actual_spend
+                    SELECT DISTINCT
+                                   orders.order_id,
+                                   orders.customer_id,
+                                   SUM(payments.payment_amount) OVER (PARTITION BY orders.order_id) AS total_order_value,
+                                   SUM(payments.payment_amount) OVER(PARTITION BY orders.customer_id ORDER BY orders.order_id) AS customer_lifetime_spend,
+                                   SUM(CASE WHEN orders.order_status NOT LIKE 'return%' 
+                                            THEN payments.payment_amount --Cumulative sum of orders that were not returned
+                                            ELSE 0 END) 
+                                            OVER (PARTITION BY orders.customer_id ORDER BY orders.order_id) AS customer_actual_spend
+                              
+                    FROM payments
                           
-                          FROM orders
+                    LEFT JOIN orders
+                    USING(order_id)
 
-                          LEFT JOIN customer_payment
-                          USING(order_id)
+                    ORDER BY 2,1
 
-                          ORDER BY 2,1
-
-                        ),
+                   ),
 
 
 -- Final CTE
